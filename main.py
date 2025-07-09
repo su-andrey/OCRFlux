@@ -47,58 +47,51 @@ except Exception as e:
     raise
 
 
-def process_pdf(file_path: str, question: str = PROMPT) -> str:
+def process_pdf(file_path: str, question: str = PROMPT, is_pdf=True) -> str:
     try:
-        doc = fitz.open(file_path)
         full_text = ""
-        for page_num in range(
-                min(2, len(doc))):  # Пока больше двух страниц за раз не обрабатываю, обработка постранично
-            print(f"Обрабатывается страница {page_num + 1}")
-            pix = doc[page_num].get_pixmap(dpi=200)
-            if pix.width == 0 or pix.height == 0:
-                print(f"Пустая страница {page_num + 1}")
-                continue
-            # Прочитал изображение страницы, проверил на корректность (не пустоту), сохранил в формате для модели
-            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            if image.size[0] == 0 or image.size[1] == 0:
-                print(f"Нулевой размер изображения на странице {page_num + 1}")
-                continue
-            image.save(f"page_{page_num + 1}.png")
-            messages = [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": f"file://page_{page_num + 1}.png"},
-                        {"type": "text", "text": PROMPT}
-                    ],
-                },
-            ]
+        doc = fitz.open(file_path)
+        pix = doc[0].get_pixmap(dpi=200)
+        image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        image.save(f"page.png")
+        # Прочитал изображение страницы, проверил на корректность (не пустоту), сохранил в формате для модели
+        if image.size[0] == 0 or image.size[1] == 0:
+            print("Нулевой размер изображения на странице")
+            return
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": f"file://page.png"},
+                    {"type": "text", "text": PROMPT}
+                ],
+            },
+        ]
 
-            text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            inputs = processor(text=[text], images=[image], padding=True, return_tensors="pt")
-            inputs = inputs.to(model.device)
-            outputs_ids = model.generate(**inputs, temperature=0.0, max_new_tokens=4096, do_sample=False)
-            generated_ids = outputs_ids[:, inputs.input_ids.shape[1]:]
-            output_text = \
-            processor.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
-            # Получаем распознанный текст от модели, после чего добавляем его в общую переменную
-            try:
-                result_data = json.loads(output_text)  # Обрабатываем в форме json
-                if isinstance(result_data,
-                              dict) and 'natural_text' in result_data:  # Извлекаем поле natural text - остальные технические: например язык, наличие таблиц и картинок
-                    full_text += f"\n\n------------------ Страница {page_num + 1} ------------------\n{result_data['natural_text']}"
-                else:
-                    full_text += f"\n\n------------------ Страница {page_num + 1} ------------------\n{output_text}"  # Если вдруг получаем не json или json без нужного поля (что само по себе странно), просто пишем то, что получили
-            except json.JSONDecodeError:
-                full_text += f"\n\n------------------ Страница {page_num + 1} ------------------\n{output_text}"
-            del inputs, outputs_ids, image  # Подчищаем за собой хранилище, в том числе картинку
-            clean_gpu()
+        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = processor(text=[text], images=[image], padding=True, return_tensors="pt")
+        inputs = inputs.to(model.device)
+        outputs_ids = model.generate(**inputs, temperature=0.0, max_new_tokens=4096, do_sample=False)
+        generated_ids = outputs_ids[:, inputs.input_ids.shape[1]:]
+        output_text = \
+        processor.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
+        # Получаем распознанный текст от модели, после чего добавляем его в общую переменную
+        try:
+            result_data = json.loads(output_text)  # Обрабатываем в форме json
+            if isinstance(result_data,
+                          dict) and 'natural_text' in result_data:  # Извлекаем поле natural text - остальные технические: например язык, наличие таблиц и картинок
+                full_text += result_data['natural_text']
+            else:
+                full_text += output_text  # Если вдруг получаем не json или json без нужного поля (что само по себе странно), просто пишем то, что получили
+        except json.JSONDecodeError:
+            full_text += output_text
+        del inputs, outputs_ids, image  # Подчищаем за собой хранилище, в том числе картинку
+        clean_gpu()
         return full_text.strip()
-
     except Exception as page_error:
-        print(f"Ошибка обработки страницы {page_num + 1}: {page_error}")
-        full_text += f"\n\n[Ошибка на странице {page_num + 1}]"
+        print(f"Ошибка обработки страницы: {page_error}")
+        full_text += f"\n\n[Ошибка на странице]"
         if 'inputs' in locals():
             del inputs  # Подчищаем за собой хранилище
         clean_gpu()
