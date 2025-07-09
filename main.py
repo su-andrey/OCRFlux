@@ -1,4 +1,5 @@
-!pip install - q torch transformers accelerate pymupdf Pillow !mkdir - p. / offload
+!pip install -q torch transformers accelerate pymupdf Pillow
+!mkdir -p ./offload
 
 import torch
 from transformers import AutoModelForImageTextToText, AutoProcessor
@@ -53,7 +54,9 @@ def process_pdf(file_path: str, question: str = PROMPT, is_pdf=True) -> str:
         doc = fitz.open(file_path)
         pix = doc[0].get_pixmap(dpi=200)
         image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        image.save(f"page.png")
+        if is_pdf:
+          image.save("page.png")
+          file_path = "page.png"
         # Прочитал изображение страницы, проверил на корректность (не пустоту), сохранил в формате для модели
         if image.size[0] == 0 or image.size[1] == 0:
             print("Нулевой размер изображения на странице")
@@ -63,7 +66,7 @@ def process_pdf(file_path: str, question: str = PROMPT, is_pdf=True) -> str:
             {
                 "role": "user",
                 "content": [
-                    {"type": "image", "image": f"file://page.png"},
+                    {"type": "image", "image": f"file://file_path"},
                     {"type": "text", "text": PROMPT}
                 ],
             },
@@ -104,8 +107,8 @@ if __name__ == "__main__":
     if not uploaded:
         print("Файл не загружен")
     else:
-        pdf_name = next(iter(uploaded))
-        result = process_pdf(pdf_name, PROMPT)
+        file_name = next(iter(uploaded))
+        result = process_pdf(file_name, PROMPT, file_name[-4:]=='.pdf')
         print("Результат обработки:")
         print(result)  # Пока вывожу в консоль для проверки
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # текст называем по времени
