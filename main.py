@@ -1,5 +1,5 @@
-!pip install -q torch transformers accelerate pymupdf Pillow
-!mkdir -p ./offload
+# !pip install -q torch transformers accelerate pymupdf Pillow  - для установки библиотек в колаб
+# !mkdir -p ./offload  - для подгрузки в коллаб
 
 import torch
 from transformers import AutoModelForImageTextToText, AutoProcessor
@@ -9,13 +9,12 @@ from google.colab import files
 import gc
 from datetime import datetime
 import json
+import os
 
 PROMPT = ("This is the image of one page of document. Just return the plain text"
           "of this document as if you were reading it naturally. ALL tables should be presented in HTML format. "
           "If there are images or figures, present them as <Image>(left,top),(right,bottom)</Image> "
           "Present all titles and headings as H1 headings. Do not hallucinate")
-
-
 # Промпт используемый по всему коду вынесен в константу
 
 # Максимально подчищаем память в связи с низким количеством ресурсов
@@ -25,7 +24,6 @@ def clean_gpu():
         torch.cuda.synchronize()
     gc.collect()
     print(f"GPU память свободна: {torch.cuda.mem_get_info()[0] / 1024 ** 3:.1f} GB")
-
 
 clean_gpu()
 
@@ -47,8 +45,7 @@ except Exception as e:
     print(f"Ошибка загрузки модели: {e}")
     raise
 
-
-def process_pdf(file_path: str, question: str = PROMPT, is_pdf=True) -> str:
+def convert_to_md(file_path: str, question: str = PROMPT, is_pdf=True) -> str:
     try:
         full_text = ""
         doc = fitz.open(file_path)
@@ -100,24 +97,39 @@ def process_pdf(file_path: str, question: str = PROMPT, is_pdf=True) -> str:
         clean_gpu()
         return full_text.strip()
 
+def process_batch(file_paths: list) -> dict:
+    results = {}
+    for file_path in file_paths: # Обрабатываем каждый файл по отдельности
+        try:
+            print(f"Обработка файла: {file_path}")
+            result = convert_to_md(file_path, PROMPT, file_path[-4:] == '.pdf') # Вызываем функцию для каждого файла
+            results[os.path.basename(file_path)] = result  # Для удобства в качестве ключа используем название файла
+        except Exception as e:
+            print(f"Ошибка при обработке файла {file_path}: {e}")
+            results[os.path.basename(file_path)] = f"Ошибка обработки: {str(e)}"
+    return results
 
 if __name__ == "__main__":
-    print("Загрузите PDF файл для извлечения текста (до 5MB). Рекомендованные языки: английский/китайский:")
+    print("Загрузите PDF или изображения для извлечения текста (до 5MB каждый). Рекомендованные языки: английский/китайский:")
     uploaded = files.upload()
     if not uploaded:
-        print("Файл не загружен")
+        print("Файлы не загружены")
     else:
-        file_name = next(iter(uploaded))
-        result = process_pdf(file_name, PROMPT, file_name[-4:]=='.pdf')
-        print("Результат обработки:")
-        print(result)  # Пока вывожу в консоль для проверки
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # текст называем по времени
-        filename = f"extracted_text_{timestamp}.md"
-        with open(filename, "w", encoding="utf-8") as md_file:
-            md_file.write(result)  # Сохраняем
-        files.download(filename)  # Загрузка для коллаба
+        file_paths = []
+        for file_name in uploaded:
+            file_paths.append(file_name)
+        results = process_batch(file_paths)
+        for filename, result in results.items():
+            print(f"\nРезультат обработки {filename}:")
+            print(result)
+            base_name = os.path.splitext(filename)[0]  # Выделяем название файла без разрешения
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_filename = f"{base_name}_{timestamp}.md"
+            with open(output_filename, "w", encoding="utf-8") as md_file:
+                md_file.write(result)  # Записываем результат в файл
+            files.download(output_filename)  # Загрузка из колаба
     if 'processor' in globals():
         del processor
     if 'model' in globals():
         del model
-    clean_gpu()  # Подчищаем за собой память
+    clean_gpu()
