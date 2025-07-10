@@ -39,7 +39,7 @@ def clean_gpu():
     print(f"GPU память свободна: {torch.cuda.mem_get_info()[0] / 1024 ** 3:.1f} GB")
 
 
-processor, model = None, None # Предобъявляем модель и процессор перед запуском
+processor, model = None, None  # Предобъявляем модель и процессор перед запуском
 
 @app.on_event("startup")  # Запускаем модель при старте сервера с экономией по памяти
 async def startup_event():
