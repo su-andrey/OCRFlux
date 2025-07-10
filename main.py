@@ -1,5 +1,5 @@
 #!pip install -q torch transformers accelerate pymupdf Pillow fastapi python-multipart nest-asyncio pyngrok
-# !mkdir -p ./offload  - Загрузка библиотек и создание директорий в колабе
+#!mkdir -p ./offload
 
 
 import gc
@@ -68,44 +68,45 @@ def convert_to_md(file_path: str, question: str = PROMPT, is_pdf=True) -> str:
     try:
         full_text = ""
         doc = fitz.open(file_path)
-        pix = doc[0].get_pixmap(dpi=200)
-        image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        if is_pdf:
-            image.save("page.png")
-            file_path = "page.png"
-        # Прочитал изображение страницы, проверил на корректность (не пустоту), сохранил в формате для модели
-        if image.size[0] == 0 or image.size[1] == 0:
-            print("Нулевой размер изображения на странице")
-            return
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": f"file://file_path"},
-                    {"type": "text", "text": PROMPT}
-                ],
-            },
-        ]
-        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = processor(text=[text], images=[image], padding=True, return_tensors="pt")
-        inputs = inputs.to(model.device)
-        outputs_ids = model.generate(**inputs, temperature=0.0, max_new_tokens=4096, do_sample=False)
-        generated_ids = outputs_ids[:, inputs.input_ids.shape[1]:]
-        output_text = \
-            processor.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
-        # Получаем распознанный текст от модели, после чего добавляем его в общую переменную
-        try:
-            result_data = json.loads(output_text)  # Обрабатываем в форме json
-            if isinstance(result_data,
-                          dict) and 'natural_text' in result_data:  # Извлекаем поле natural text - остальные технические: например язык, наличие таблиц и картинок
-                full_text += result_data['natural_text']
-            else:
-                full_text += output_text  # Если вдруг получаем не json или json без нужного поля (что само по себе странно), просто пишем то, что получили
-        except json.JSONDecodeError:
-            full_text += output_text
-        del inputs, outputs_ids, image  # Подчищаем за собой хранилище, в том числе картинку
-        clean_gpu()
+        for num in range(len(doc)):
+            pix = doc[num].get_pixmap(dpi=200)
+            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            if is_pdf:
+                image.save("page.png")
+                file_path = "page.png"
+            # Прочитал изображение страницы, проверил на корректность (не пустоту), сохранил в формате для модели
+            if image.size[0] == 0 or image.size[1] == 0:
+                print("Нулевой размер изображения на странице")
+                return
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": f"file://{file_path}"},
+                        {"type": "text", "text": PROMPT}
+                    ],
+                },
+            ]
+            text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = processor(text=[text], images=[image], padding=True, return_tensors="pt")
+            inputs = inputs.to(model.device)
+            outputs_ids = model.generate(**inputs, temperature=0.0, max_new_tokens=4096, do_sample=False)
+            generated_ids = outputs_ids[:, inputs.input_ids.shape[1]:]
+            output_text = \
+                processor.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
+            # Получаем распознанный текст от модели, после чего добавляем его в общую переменную
+            try:
+                result_data = json.loads(output_text)  # Обрабатываем в форме json
+                if isinstance(result_data,
+                              dict) and 'natural_text' in result_data:  # Извлекаем поле natural text - остальные технические: например язык, наличие таблиц и картинок
+                    full_text += result_data['natural_text']
+                else:
+                    full_text += output_text  # Если вдруг получаем не json или json без нужного поля (что само по себе странно), просто пишем то, что получили
+            except json.JSONDecodeError:
+                full_text += output_text
+            del inputs, outputs_ids, image  # Подчищаем за собой хранилище, в том числе картинку
+            clean_gpu()
         return full_text.strip()
     except Exception as page_error:
         print(f"Ошибка обработки страницы: {page_error}")
@@ -127,13 +128,14 @@ async def download_result(files: List[UploadFile] = File(...)):
                 temp_file.close()
                 temp_path = temp_file.name
             results[file.filename] = convert_to_md(temp_path, file.filename[-4:] == '.pdf')
-            os.unlink(temp_path)
+            os.unlink(temp_path)  # Удаляю самостоятельно, для надёжности в случае ошибок (поэтому выше delete=False)
         except Exception as e:
             results[file.filename] = f"Ошибка: {str(e)}"
     output_filename = f"text_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
     with open(output_filename, "w", encoding="utf-8") as f:
         for filename, content in results.items():
             f.write(content)
+            f.write("\n\n" + ("-" * 50) + "\n\n")
     return FileResponse(output_filename, filename=output_filename)
 
 
