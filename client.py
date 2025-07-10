@@ -1,7 +1,7 @@
 import requests
 from pathlib import Path
-SERVER_URL = "https://someadress12.ngrok-free.app/"  # Адрес, на котором находится сервер (выведет при запуске)
-files = ["test.pdf", "text.jpeg"]            # Файл, который хотим обработать
+SERVER_URL = "https://ca68df5a7262.ngrok-free.app/"  # Адрес, на котором находится сервер (выведет при запуске)
+files = ["test.pdf", "182.jpg"]            # Файл, который хотим обработать
 OUTPUT_FILE = "result_all.md"             # Файл для сохранения результата
 files_to_upload = []  # Список, в который будут записаны кортежи для отправки на сервер
 for file_path in files:

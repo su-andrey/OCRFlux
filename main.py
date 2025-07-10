@@ -121,6 +121,8 @@ def convert_to_md(file_path: str, question: str = PROMPT, is_pdf=True) -> str:
 async def download_result(files: List[UploadFile] = File(...)):
     results = {}
     for file in files:
+        if file.size > 3 * 1024 * 1024:
+            continue
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
                 content = await file.read()
